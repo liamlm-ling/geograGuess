@@ -1,0 +1,2 @@
+[console_scripts]
+street-view-randomizer = street_view_randomizer.main:main
