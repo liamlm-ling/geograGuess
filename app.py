@@ -1,14 +1,12 @@
 import os
+import json
 import math
-from flask import Flask, render_template, request, jsonify
+import random
+from flask import Flask, render_template, request, jsonify, session
 from haversine import haversine, Unit
-# vAIzaSyCQnMLula2xcJLhy2AlxcYzWmFLgQt4yu8
 
-
-# Initialize the Flask application
 app = Flask(__name__)
-
-START_LOC = (43.6426, -79.3871)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-in-prod")
 
 # def begin_game():
 #     # get random location available from 
@@ -20,19 +18,30 @@ def home():
     # Render and return the HTML file
     return render_template('index.html')
 
+def _load_pool():
+    try:
+        with open("locations.json") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return []
+
+_location_pool = _load_pool()
+
 @app.route('/load-game-page')
 def load_game_page():
-    # This is the function name used in url_for()
     api_key = os.environ.get("GOOGLE_MAPS_API_KEY")
-    error_message = None
     if not api_key or not api_key.startswith("AIza"):
-        error_message = (
-            "Google Maps API key is missing or invalid. "
-            "Set GOOGLE_MAPS_API_KEY in your environment to a valid key starting with 'AIza'."
-        )
-        api_key = None
+        return render_template('gamewindow.html', api_key=None, coords={},
+            error_message="Google Maps API key is missing or invalid. "
+                          "Set GOOGLE_MAPS_API_KEY in your environment to a valid key starting with 'AIza'.")
 
-    return render_template('gamewindow.html', api_key=api_key, error_message=error_message)
+    if not _location_pool:
+        return render_template('gamewindow.html', api_key=api_key, coords={},
+            error_message="Location pool is empty. Run generate_pool.py first.")
+
+    loc = random.choice(_location_pool)
+    session['start_loc'] = (loc['lat'], loc['lng'])
+    return render_template('gamewindow.html', api_key=api_key, error_message=None, coords=loc)
 
 @app.route('/load-home-page')
 def load_home_page():
@@ -53,16 +62,26 @@ def submit_guess():
         lng = float(lng)
     except (TypeError, ValueError):
         return jsonify({'error': 'invalid coordinates'}), 400
-    print(f"Received location: {lat}, {lng}")
-    dist_km = round(haversine((lat, lng), START_LOC), 2)
+    start_loc = session.get('start_loc')
+    if not start_loc:
+        return jsonify({'error': 'no active game'}), 400
+
+    dist_km = round(haversine((lat, lng), start_loc), 2)
     if dist_km <= 0.025:
         score = 5000
     else:
         score = round(5000 * math.exp(-dist_km / 500), 0)
+
     print("Guess submitted!")
     print(f"Distance from location: {dist_km} km")
     print(f"Score: {score}")
-    return jsonify({'status': 'ok', 'lat': lat, 'lng': lng})
+    return jsonify({
+        'status': 'ok',
+        'lat': lat,
+        'lng': lng,
+        'distance_km': dist_km,
+        'score': score,
+    })
 
 # def get_distance():
 #     # Placeholder: compute distance between two (lat, lng) pairs if needed.
@@ -76,4 +95,4 @@ def submit_guess():
 
 # Run the app locally in debug mode
 if __name__ == '__main__':
-    app.run(debug=True, port=5002)
+    app.run(debug=True, port=5003)
